@@ -13,15 +13,22 @@ import csv
 import math
 from pathlib import Path
 
+import matplotlib
 import numpy as np
+
+# Render PNG files without requiring a desktop chart window.
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 
 
 # ---------------------------------------------------------------------------
 # CHANGE ONLY THESE PATHS FOR THE INSTRUCTOR'S FILES.
 # ---------------------------------------------------------------------------
-TRAIN_PATH = Path("car_price_train.csv")
-TEST_PATH = Path("car_price_test.csv")
-OUTPUT_PATH = Path("predictions.csv")
+TRAIN_PATH = Path("../raw_csv/car_price_train.csv")
+TEST_PATH = Path("../sample_test/mock_instructor_test.csv")
+OUTPUT_PATH = Path("../predictions/predictions.csv")
+CHART_DIRECTORY = Path("../images/model_validation_charts")
 
 
 ID_COLUMN = "listing_id"
@@ -65,6 +72,11 @@ MINIMUM_STEPS = 200
 PRICE_FLOOR = 1200.0
 VALIDATION_ROWS = 600
 VALIDATION_SEED = 20260921
+
+NAVY = "#17365D"
+BLUE = "#4472C4"
+ORANGE = "#ED7D31"
+LIGHT_BLUE = "#DDEBF7"
 
 
 def read_csv_rows(path: Path) -> tuple[list[dict[str, str]], list[str]]:
@@ -301,6 +313,126 @@ def write_predictions(path: Path, test_rows: list[dict[str, str]], values: np.nd
             writer.writerow([row[ID_COLUMN], f"{float(value):.6f}"])
 
 
+def dollar_axis(value: float, _position: float) -> str:
+    """Format chart axes as compact dollar values."""
+    return f"${value / 1000:,.0f}k"
+
+
+def save_validation_charts(
+    actual: np.ndarray,
+    predicted: np.ndarray,
+    rmse: float,
+    mae: float,
+    r_squared: float,
+) -> list[Path]:
+    """Create model-validation graphs using only the labeled holdout rows."""
+    CHART_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    plt.style.use("seaborn-v0_8-whitegrid")
+    formatter = FuncFormatter(dollar_axis)
+    residuals = predicted - actual
+    absolute_errors = np.abs(residuals)
+    low = float(min(actual.min(), predicted.min()))
+    high = float(max(actual.max(), predicted.max()))
+    paths: list[Path] = []
+
+    figure, axis = plt.subplots(figsize=(8.5, 6.5))
+    axis.scatter(actual, predicted, s=30, alpha=0.60, color=BLUE, edgecolors="none")
+    axis.plot([low, high], [low, high], color=ORANGE, linewidth=2.2,
+              label="Perfect prediction")
+    axis.set(title="Actual vs. Predicted Sale Price",
+             xlabel="Actual sale price", ylabel="Predicted sale price")
+    axis.xaxis.set_major_formatter(formatter)
+    axis.yaxis.set_major_formatter(formatter)
+    axis.legend(frameon=True)
+    axis.text(0.03, 0.95, f"R² = {r_squared:.4f}\nRMSE = ${rmse:,.0f}",
+              transform=axis.transAxes, va="top", fontsize=11,
+              bbox={"facecolor": "white", "edgecolor": LIGHT_BLUE, "alpha": 0.9})
+    figure.tight_layout()
+    path = CHART_DIRECTORY / "01_actual_vs_predicted.png"
+    figure.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+    paths.append(path)
+
+    figure, axis = plt.subplots(figsize=(8.5, 6.0))
+    axis.scatter(predicted, residuals, s=30, alpha=0.60, color=BLUE,
+                 edgecolors="none")
+    axis.axhline(0.0, color=ORANGE, linewidth=2.0)
+    axis.set(title="Residuals vs. Predicted Price",
+             xlabel="Predicted sale price",
+             ylabel="Residual: predicted minus actual")
+    axis.xaxis.set_major_formatter(formatter)
+    axis.yaxis.set_major_formatter(formatter)
+    figure.tight_layout()
+    path = CHART_DIRECTORY / "02_residuals_vs_predicted.png"
+    figure.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+    paths.append(path)
+
+    figure, axis = plt.subplots(figsize=(8.5, 6.0))
+    axis.hist(absolute_errors, bins=25, color=BLUE, alpha=0.85, edgecolor="white")
+    axis.axvline(mae, color=ORANGE, linewidth=2.2, label=f"MAE = ${mae:,.0f}")
+    axis.set(title="Distribution of Absolute Prediction Errors",
+             xlabel="Absolute prediction error", ylabel="Number of vehicles")
+    axis.xaxis.set_major_formatter(formatter)
+    axis.legend(frameon=True)
+    figure.tight_layout()
+    path = CHART_DIRECTORY / "03_absolute_error_distribution.png"
+    figure.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+    paths.append(path)
+
+    within_2500 = 100.0 * float(np.mean(absolute_errors <= 2500.0))
+    within_5000 = 100.0 * float(np.mean(absolute_errors <= 5000.0))
+    figure, axes = plt.subplots(2, 2, figsize=(13.5, 9.0))
+    figure.suptitle("Used-Car Price Model: 600-Row Validation Results",
+                    fontsize=20, fontweight="bold", color=NAVY)
+
+    axes[0, 0].scatter(actual, predicted, s=20, alpha=0.55, color=BLUE,
+                       edgecolors="none")
+    axes[0, 0].plot([low, high], [low, high], color=ORANGE, linewidth=1.8)
+    axes[0, 0].set(title="Actual vs. predicted", xlabel="Actual price",
+                   ylabel="Predicted price")
+    axes[0, 0].xaxis.set_major_formatter(formatter)
+    axes[0, 0].yaxis.set_major_formatter(formatter)
+
+    axes[0, 1].scatter(predicted, residuals, s=20, alpha=0.55, color=BLUE,
+                       edgecolors="none")
+    axes[0, 1].axhline(0.0, color=ORANGE, linewidth=1.8)
+    axes[0, 1].set(title="Residual check", xlabel="Predicted price",
+                   ylabel="Predicted minus actual")
+    axes[0, 1].xaxis.set_major_formatter(formatter)
+    axes[0, 1].yaxis.set_major_formatter(formatter)
+
+    axes[1, 0].hist(absolute_errors, bins=25, color=BLUE, alpha=0.85,
+                    edgecolor="white")
+    axes[1, 0].axvline(mae, color=ORANGE, linewidth=1.8)
+    axes[1, 0].set(title="Absolute error distribution",
+                   xlabel="Absolute error", ylabel="Vehicles")
+    axes[1, 0].xaxis.set_major_formatter(formatter)
+
+    percentages = [within_2500, within_5000]
+    bars = axes[1, 1].bar(["Within\n$2,500", "Within\n$5,000"], percentages,
+                          color=[BLUE, NAVY], width=0.58)
+    axes[1, 1].set(title="Share of predictions near actual price",
+                   ylabel="Percent of validation vehicles", ylim=(0.0, 100.0))
+    for bar, percentage in zip(bars, percentages):
+        axes[1, 1].text(bar.get_x() + bar.get_width() / 2.0,
+                        percentage + 2.0, f"{percentage:.1f}%",
+                        ha="center", fontweight="bold")
+    axes[1, 1].text(
+        0.5, 0.48,
+        f"RMSE  ${rmse:,.0f}\nMAE     ${mae:,.0f}\nR²       {r_squared:.4f}",
+        transform=axes[1, 1].transAxes, ha="center", va="center", fontsize=12,
+        bbox={"facecolor": "white", "edgecolor": LIGHT_BLUE},
+    )
+    figure.tight_layout(rect=[0.0, 0.0, 1.0, 0.95])
+    path = CHART_DIRECTORY / "00_validation_dashboard.png"
+    figure.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+    paths.insert(0, path)
+    return paths
+
+
 def print_validation_report(train_rows: list[dict[str, str]], target: np.ndarray) -> None:
     """Run a reproducible holdout evaluation using labels from the training CSV."""
     if len(train_rows) <= VALIDATION_ROWS:
@@ -337,6 +469,9 @@ def print_validation_report(train_rows: list[dict[str, str]], target: np.ndarray
     r_squared = 1.0 - float(np.sum(errors**2)) / total_variation
     within_2500 = 100.0 * float(np.mean(absolute_errors <= 2500.0))
     within_5000 = 100.0 * float(np.mean(absolute_errors <= 5000.0))
+    chart_paths = save_validation_charts(
+        validation_target, predictions, rmse, mae, r_squared
+    )
 
     print("\n--- Reproducible validation accuracy ---")
     print("These statistics use held-out training labels, not unknown test labels.")
@@ -356,6 +491,9 @@ def print_validation_report(train_rows: list[dict[str, str]], target: np.ndarray
         "Validation tolerance reached: "
         f"{'yes' if validation_model.converged else 'no; maximum iterations reached'}"
     )
+    print("Validation charts:")
+    for path in chart_paths:
+        print(f"  {path.resolve()}")
 
 
 def main() -> None:
