@@ -63,6 +63,8 @@ TRAINING_STEPS = 2200
 GRADIENT_TOLERANCE = 2.5e-4
 MINIMUM_STEPS = 200
 PRICE_FLOOR = 1200.0
+VALIDATION_ROWS = 600
+VALIDATION_SEED = 20260921
 
 
 def read_csv_rows(path: Path) -> tuple[list[dict[str, str]], list[str]]:
@@ -299,6 +301,63 @@ def write_predictions(path: Path, test_rows: list[dict[str, str]], values: np.nd
             writer.writerow([row[ID_COLUMN], f"{float(value):.6f}"])
 
 
+def print_validation_report(train_rows: list[dict[str, str]], target: np.ndarray) -> None:
+    """Run a reproducible holdout evaluation using labels from the training CSV."""
+    if len(train_rows) <= VALIDATION_ROWS:
+        print("Validation report skipped: not enough labeled rows for the configured holdout.")
+        return
+
+    rng = np.random.default_rng(VALIDATION_SEED)
+    shuffled = rng.permutation(len(train_rows))
+    validation_indices = shuffled[:VALIDATION_ROWS]
+    fitting_indices = shuffled[VALIDATION_ROWS:]
+    fitting_rows = [train_rows[int(index)] for index in fitting_indices]
+    validation_rows = [train_rows[int(index)] for index in validation_indices]
+    fitting_target = target[fitting_indices]
+    validation_target = target[validation_indices]
+
+    # Learn every preprocessing value from the fitting rows only. This keeps
+    # validation genuinely unseen during fitting and avoids preprocessing leak.
+    builder = FeatureBuilder()
+    builder.fit(fitting_rows)
+    fitting_x = builder.transform(fitting_rows)
+    validation_x = builder.transform(validation_rows)
+    uncensored = fitting_target > PRICE_FLOOR + 1.0e-9
+
+    validation_model = ManualLinearRegressor(l2_strength=DEFAULT_L2_STRENGTH)
+    validation_model.fit(fitting_x[uncensored], fitting_target[uncensored])
+    predictions = np.maximum(PRICE_FLOOR, validation_model.predict(validation_x))
+
+    errors = predictions - validation_target
+    absolute_errors = np.abs(errors)
+    rmse = math.sqrt(float(np.mean(errors**2)))
+    mae = float(np.mean(absolute_errors))
+    median_absolute_error = float(np.median(absolute_errors))
+    total_variation = float(np.sum((validation_target - validation_target.mean()) ** 2))
+    r_squared = 1.0 - float(np.sum(errors**2)) / total_variation
+    within_2500 = 100.0 * float(np.mean(absolute_errors <= 2500.0))
+    within_5000 = 100.0 * float(np.mean(absolute_errors <= 5000.0))
+
+    print("\n--- Reproducible validation accuracy ---")
+    print("These statistics use held-out training labels, not unknown test labels.")
+    print(f"Split seed: {VALIDATION_SEED}")
+    print(f"Fitting rows: {len(fitting_rows)}")
+    print(f"Held-out validation rows: {len(validation_rows)}")
+    print(f"RMSE: ${rmse:,.2f}")
+    print(f"MAE:  ${mae:,.2f}")
+    print(f"Median absolute error: ${median_absolute_error:,.2f}")
+    print(f"R-squared: {r_squared:.4f}")
+    print(f"Predictions within $2,500: {within_2500:.1f}%")
+    print(f"Predictions within $5,000: {within_5000:.1f}%")
+    print(f"Actual price range: ${validation_target.min():,.2f} to ${validation_target.max():,.2f}")
+    print(f"Predicted price range: ${predictions.min():,.2f} to ${predictions.max():,.2f}")
+    print(f"Validation iterations used: {validation_model.iterations_used}")
+    print(
+        "Validation tolerance reached: "
+        f"{'yes' if validation_model.converged else 'no; maximum iterations reached'}"
+    )
+
+
 def main() -> None:
     train_rows, train_columns = read_csv_rows(TRAIN_PATH)
     test_rows, test_columns = read_csv_rows(TEST_PATH)
@@ -321,6 +380,10 @@ def main() -> None:
     if np.any(target <= 0.0):
         raise ValueError(f"Training {TARGET_COLUMN} must be positive")
 
+    # Print demo-style accuracy before refitting on all labeled rows. The final
+    # instructor test file has no target, so its true accuracy is unknowable.
+    print_validation_report(train_rows, target)
+
     # Prices at the repeated data floor are censored observations: their latent
     # values are at or below the floor, not ordinary $1,200 measurements.  Fit
     # the linear relationship on uncensored observations and apply the known
@@ -338,6 +401,11 @@ def main() -> None:
     model.fit(train_x, target[uncensored])
     predictions = np.maximum(PRICE_FLOOR, model.predict(test_x))
     write_predictions(OUTPUT_PATH, test_rows, predictions)
+    print("\n--- Final full-data fit and prediction file ---")
+    print(f"Training rows used for final feature fitting: {len(train_rows)}")
+    print(f"Uncensored target rows used for regression fitting: {int(uncensored.sum())}")
+    print(f"Test rows predicted: {len(test_rows)}")
+    print(f"Constructed feature columns including intercept: {train_x.shape[1]}")
     print(f"Learning rate: {LEARNING_RATE}")
     print(f"Maximum iterations: {TRAINING_STEPS}")
     print(f"Gradient stop tolerance: {GRADIENT_TOLERANCE:.1e}")
