@@ -1,0 +1,64 @@
+# -----------------------------------------------------------------------------
+# Python virtual environments
+# -----------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# -----------------------------------------------------------------------------
+# Python caches, compiled files, and tool caches
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# -----------------------------------------------------------------------------
+# Secrets and local environment configuration
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# -----------------------------------------------------------------------------
+# Operating-system, editor, log, and temporary files
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+*.tmp
+*.temp
+*.log
+tmp/
+temp/
+
+# -----------------------------------------------------------------------------
+# Generated model outputs (recreate these by running the programs)
+# -----------------------------------------------------------------------------
+predictions.csv
+predictions_validation.csv
+demo_predictions.csv
+mock_predictions.csv
+
+# -----------------------------------------------------------------------------
+# INSTRUCTOR-PROVIDED HIDDEN DATA — NEVER COMMIT THESE FILES
+# Keep hidden files in private_data/ or name them with hidden/instructor_test.
+# Add the exact filename here immediately when the instructor supplies it.
+# -----------------------------------------------------------------------------
+private_data/
+hidden_data/
+*hidden*test*.csv
+*hidden*label*.csv
+instructor_test*.csv
+instructor_hidden*.csv
+car_price_test.csv
+test_labels.csv
+hidden_labels.csv
